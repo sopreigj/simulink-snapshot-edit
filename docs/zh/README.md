@@ -2,7 +2,7 @@
 
 [English](../en/README.md) · 中文
 
-这里回答 **README 之外**的问题：README 教你"怎么跑起来"（[回 README](../../README.md)），这里教"怎么维护、为什么这样设计"。
+这里回答 **README 之外**的问题：README 教你"怎么跑起来"（[回 README](../../README.zh-CN.md)），这里教"怎么维护、为什么这样设计"。
 
 按 [Diátaxis](https://diataxis.fr/) 四类组织，**一篇服务一种读者需求**：
 
