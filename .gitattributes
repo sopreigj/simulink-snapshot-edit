@@ -1,0 +1,4 @@
+# 快照须保持 LF：verify_snapshots_fresh 逐字节比对导出器输出与仓库文件，
+# core.autocrlf=true 会在 checkout 时把 LF 翻成 CRLF，导致假漂移。
+# 仅锁定产物目录，不动 src/ 与 test/ 其余 .m 的历史 CRLF 文件。
+test/snapshots/*.m text eol=lf

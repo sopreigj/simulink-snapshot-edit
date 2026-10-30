@@ -1,0 +1,26 @@
+# MATLAB
+*.slx.original
+*.slxc
+**/slprj/
+*_grt_rtw/
+*.autosave
+# 状态边界
+private/
+*.txt
+*.log
+rt_tmp/
+
+# S-Function 探针夹具（verify_special_blocks 等 3 脚本运行时自建）
+snp_defprobe.slx
+test/sfun_probe/
+
+# 所有验证/诊断输出的约定去处（套件脚本写 test/scratch/，整个忽略）
+test/scratch/
+# 兜底：config_local 的 OutDir 若被用户改回顶层 scratch，也别污染工作树
+/scratch/
+
+# 跨版本归档（verify_multiver 输出）
+test/scripts/multiver/
+
+# 本机真实配置（示例孪生=config_example.m，入库；本文件不入库）
+config_local.m
