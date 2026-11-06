@@ -58,16 +58,18 @@ rep = snp_pull(mdl, snapFile, opts)
 - **强制从磁盘重载**：内部 `close_system` + `bdclose` + `load_system`（防止读到内存里的同名旧模型）。
 - 先用 `snp_export` 把当前模型导到临时目录，再与旧快照做节级合并。
 
-### 运行时提醒（不阻断；`warning('off',…)` 可静默）
+### 运行时守卫（T70）
 
-强关重载之前会检查两项 Simulink 运行时状态，命中时发 warning：
+强关重载之前会检查两项 Simulink 运行时状态：
 
-| 条件 | warning id | 含义 |
+| 条件 | 行为 | id |
 |---|---|---|
-| `Dirty='on'`（人有未保存的 GUI 改动） | `snp:dirtyUnsaved` | 无保存强关会**丢弃未保存改动**——先 `save_system(mdl)` |
-| `SimulationStatus~='stopped'` | `snp:simRunning` | 仿真中不能改结构、强关会中断仿真——先停仿真 |
+| `Dirty='on'`（人有未保存的 GUI 改动） | **默认阻断**（error），须先 `save_system(mdl)` 或传 `opts.Force=true` 明确放弃 | error `snp:dirtyBlocked`，前置 warning `snp:dirtyUnsaved` |
+| `SimulationStatus~='stopped'` | 只警告（强关会中断仿真——先停仿真） | warning `snp:simRunning` |
 
-导出端（`snp_export`）只查仿真状态；库传播端（`snp_propagate`）在`bdclose('all')` 前对库与每个模型两项都查。
+为什么 Dirty 阻断而仿真只警告：强关重载会**直接丢弃**未保存改动（不可恢复），而中断仿真不丢模型数据——"会丢数据"必须由明确意图推翻，不能默认通过。
+
+导出端（`snp_export`）只查仿真状态；库传播端（`snp_propagate`）在 `bdclose('all')` 前对库与每个模型发同样的提醒，且对**全部已加载块图**做 Dirty 阻断。
 
 ### opts 字段
 
@@ -75,6 +77,7 @@ rep = snp_pull(mdl, snapFile, opts)
 |---|---|---|
 | `LibDir` | `''` | 传给内部 snp_export 的库目录 |
 | `AliasMap` | `cell(0,2)` | 别名表 |
+| `Force` | `false` | `true`=模型带未保存 GUI 改动时仍放行（明确放弃这些改动） |
 
 ### rep 字段
 
@@ -253,11 +256,12 @@ rep = snp_collab_check('Model', 'BaselineFile', 'x.slx')       % 与磁盘文件
 | 字段 | 说明 |
 |---|---|
 | `fileChecksum` | 文件级 MD5（char）；模型未存盘时留空 |
-| `funcChecksum` | 功能级 `[4x1 uint32]` |
-| `funcEqual` | Compare 模式：两模型功能是否等价 |
-| `fileEqual` | BaselineFile 模式：与基线文件是否字节一致 |
+| `funcChecksum` | 功能级 `[4x1 uint32]`；获取失败为 `[]` |
+| `funcEqual` | Compare 模式，**三态**：`1`=相同 / `0`=不同 / `-1`=不可判定 |
+| `fileEqual` | BaselineFile 模式，**三态**：`1`=一致 / `0`=不同 / `-1`=不可判定 |
 | `notes` | 说明（判断依据） |
 
+- **三态语义（T71）**：校验和不可得（模型未存盘 / 编译失败 / 读取异常）是**不可判定 `-1`，不是"相同"**——两侧都失败时旧版 `isequal([],[])` 会误报"功能等价"。消费者必须先排除 `-1` 再用真值，**不可判定不得视为通过**。
 - `BlockDiagram.getChecksum` 会**编译模型**（官方行为），`-batch` 里调用较慢。
 - 模型未存盘时 `fileChecksum` 留空（`get_param('FileName')` 不可得）。
 
@@ -299,6 +303,10 @@ rep = snp_propagate('mylib', 'auto', opts)     % 引用模型自动发现
 | `LibSnap` | `WorkDir/snapshot_<lib>.m` | 库快照路径 |
 | `ModelSnaps` | `{}`（逐个 `WorkDir/snapshot_<m>.m`） | 各模型快照路径 |
 | `Check` | 空 struct 数组 | 期望校验：每项字段 `.model` / `.block` / `.param` / `.value`（字符串比对） |
+| `Force` | `false` | `true`=任一已加载模型带未保存改动时仍放行（明确放弃这些改动） |
+
+- **Dirty 全量阻断（T70）**：`bdclose('all')` 会无保存强关**全部**已加载块图，守卫用 `Simulink.allBlockDiagrams` 对全量做 Dirty 检查，任一未保存默认 error `snp:dirtyBlocked`（列出名单）；`Force=true` 才放行。守卫自身枚举失败时降级为 warning（fail-open，不因守卫故障卡死工具链）。
+- **'auto' 发现顺序（T72）**：先扫 `WorkDir/snapshot_*.m` 得到引用名单，再进提醒/守卫循环——`'auto'` 是 char/string 标量，先做花括号索引会直接崩。
 
 `models` 参数可传 cell（模型名列表）或 `'auto'`：后者扫描 `WorkDir` 里所有含 `add_block('<libModel>/…', …)` 的 `snapshot_*.m` 自动发现引用模型。
 

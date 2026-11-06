@@ -44,7 +44,7 @@ rep = snp_pull('MyModel', 'test/snapshots/snapshot_MyModel.m', opts);
 
 来源：[Saving a Model](https://in.mathworks.com/help/simulink/ug/saving-a-model.html)、[Controlling Execution of a Simulation](https://es.mathworks.com/help/simulink/ug/controlling-execution-of-a-simulation.html)、[Fast Restart](https://au.mathworks.com/help/simulink/ug/fast-restart-workflow.html)；内存/文件分叉与 `bdclose` 重载姿势见上文"内存里的模型 vs 磁盘上的文件"。
 
-工具会就上述两条主动提醒（不阻断执行，`warning('off','snp:dirtyUnsaved')`可静默）：`snp_pull` / `snp_propagate` 在无保存强关模型前检测`Dirty='on'` 与 `SimulationStatus`，命中时分别发`snp:dirtyUnsaved` / `snp:simRunning`；`snp_export` 只查仿真状态。
+工具会就上述两条主动介入（T70 起 Dirty **默认阻断**，仿真中仍只提醒）：`snp_pull` / `snp_propagate` 在无保存强关模型前检测`Dirty='on'` 与 `SimulationStatus`——命中 `Dirty='on'` 时发 `snp:dirtyUnsaved` 后**报 error `snp:dirtyBlocked`**（无保存强关会不可恢复地丢弃改动；先 `save_system`，或传 `opts.Force=true` 明确放弃）；仿真中则只发 `snp:simRunning`（中断仿真不丢模型数据）。`snp_export` 只查仿真状态。
 
 ## pull 前先判断"谁动过"
 
@@ -71,7 +71,7 @@ disp(rep.funcEqual);   % 期望 true：pull 后的快照重建件与改后模型
 ## 验证脚本
 
 - `test/scripts/test_roundtrip.m` 端到端覆盖基础循环：A1 快照重建 == 模型 diff=0；A2 最小改动 + 注释保留；B 人类三操作（移位 / 加块 / 删块）pull 后注释全留；C pull 后快照重建 == 改后模型 diff=0。
-- `test/scripts/verify_collab.m` 场景矩阵（8 条）：C1-C3 同上沉淀，另含 **C4 dirty 提醒**（人没存盘就 pull → `snp:dirtyUnsaved`）、**C5 仿真中提醒**（SimulationStatus=running → `snp:simRunning`）、C6-C8 merge3 正交 / 同块冲突（theirs 优先） / 删 vs 改（删优先）。
+- `test/scripts/verify_collab.m` 场景矩阵（8 条）：C1-C3 同上沉淀，另含 **C4 dirty 阻断+Force**（人没存盘就 pull → `snp:dirtyUnsaved` + `snp:dirtyBlocked` 阻断、快照未动；`Force=true` 放行；存盘后正常合并）、**C5 仿真中提醒**（SimulationStatus=running → `snp:simRunning`）、C6-C8 merge3 正交 / 同块冲突（theirs 优先） / 删 vs 改（删优先）。
 
 ## 常见坑
 

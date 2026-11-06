@@ -11,6 +11,10 @@
 - **README 按开源规范重写**：slogan、特性、前置条件、安装、快速开始、工作流（三级阶梯 + 双向表）、项目结构、文档导航、测试、已知限制、许可、贡献。保真细节与能力边界表保留在 `docs/{zh,en}/explanation/` 与 `reference/`。
 
 ### Fixed
+- **假成功路径：`funcEqual`/`fileEqual` 三态化（T71）**：两侧 `Simulink.BlockDiagram.getChecksum` 都获取失败时旧版 `isequal([],[])` 返回 true，被误报"功能等价"（外部只读审查证实，静态可判定）。改为 **1=相同 / 0=不同 / -1=不可判定**，不可判定不得视为通过（与 verify_collab C3 既有 -1 哨兵实践一致）。
+- **数据丢失路径：dirty 默认阻断（T70）**：`snp_pull` / `snp_propagate` 对 `Dirty=on`（人有未保存 GUI 改动）从"只警告"升级为默认 error `snp:dirtyBlocked`——无保存强关会**不可恢复地丢弃**这些改动，"会丢数据"必须由明确意图推翻而非默认通过。放行口：`opts.Force=true`。`snp_propagate` 的守卫覆盖**全部已加载块图**（`Simulink.allBlockDiagrams`，因为 `bdclose('all')` 波及全量），枚举自身失败时降级为 warning（fail-open）。`snp_runtime_warn` 同时返回结构化状态 `st.simRunning` / `st.dirty` 供调用方决策。仿真中仍只警告（中断仿真不丢模型数据）。verify_collab C4 更新为阻断语义。
+- **死接口：`snp_propagate` 的 `models='auto'` 崩溃（T72）**：旧顺序对 `models` 先做 `models{i}` 花括号索引、后才判 `'auto'`，char 输入直接报错、自动发现**永远走不到**（外部只读审查证实）。改为先发现再进提醒/守卫循环，并补 string 标量 `"auto"` 支持。
+- **测试覆盖缺口：新增 `verify_propagate` 套件**：库传播 4 例（手改库文件传播 / `auto` 发现名单 / Dirty 阻断+Force 放行 / 改库快照整链重建）——此前 `snp_propagate` 在 test/ 下零覆盖。
 - `docs/{zh,en}/skills/simulink-snapshot-editing/SKILL.md` 内 `../../docs/reference/tool-api.md` 错链（应为 `../../reference/tool-api.md`）。
 - **教程可照抄性**：`model-to-snapshot.md` 第 1 步补 `load_system('test/models/ToyBasic.slx')` 前置（`snp_export` 只按裸名找已载入模型）；7 处 `examples/scripts` 过期路径（verify_multiver/verify_cross_behavior/demo_local_edit 头注释、work-across-versions）改 `test/scripts`；how-tos 三处 XML 示例的占位资产 `MyModel.slx` 换成仓库真实玩具模型。
 - **SKILL.md YAML frontmatter**：两份 skill 副本的 frontmatter 在此前段落合并中被压成单行（YAML 解析失败），已按原结构恢复。

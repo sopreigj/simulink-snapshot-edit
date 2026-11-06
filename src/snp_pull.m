@@ -12,6 +12,10 @@
 %    rep = snp_pull('MyModel', 'snapshot_MyModel.m', opts);
 %    rep.nAdd / nDel / nChg / nNoteKept —— 新增块/删除块/变更块/保留注释数
 %
+%    opts.Force      模型带未保存 GUI 改动（Dirty=on）时，pull 默认**阻断**
+%                    （强关重载会把这些改动直接丢弃）；true=明确放弃未保存
+%                    改动，放行（T70）
+%
 %  合并算法（按节）：
 %    - 节标题与手写内容（非语句行）一律保留旧快照的；
 %    - 块节：旧 token 流（注释/语句交替）逐 token 走：注释→保留；语句（块 X）：
@@ -25,11 +29,20 @@ function rep = snp_pull(mdl, snapFile, opts)
   if nargin < 3, opts = struct; end
   if ~isfield(opts, 'LibDir'), opts.LibDir = ''; end
   if ~isfield(opts, 'AliasMap'), opts.AliasMap = cell(0,2); end
+  if ~isfield(opts, 'Force'), opts.Force = false; end   % T70：默认护住人的未保存改动
   addpath(fileparts(which('snp_export')));
   % 强制从磁盘重载：MATLAB 可能残留同名已加载模型（shadow），
   % 不重载会读到旧内容——pull 的前提是"磁盘上的模型即人类刚改的"
   % 重载前提醒：仿真中/未保存改动都会在下面的无保存强关里出事（T59 同族）
-  snp_runtime_warn(mdl, 'reload');
+  st = snp_runtime_warn(mdl, 'reload');
+  % T70：Dirty=on 的 GUI 改动只存于内存，下面的无保存强关会直接丢弃。
+  %      默认阻断——"会丢数据"必须由明确意图（Force=true）推翻，不能
+  %      默认通过（不可判定/会丢数据不得算成功，同 T71 精神）
+  if st.dirty && ~opts.Force
+    error('snp:dirtyBlocked', ...
+      ['模型 ''%s'' 有未保存的 GUI 改动（Dirty=on），pull 会从磁盘重载并丢弃它们。\n' ...
+       '  先保存：save_system(''%s'')；或明确放弃：opts.Force = true'], mdl, mdl);
+  end
   try, close_system(mdl, 0); catch, end
   try, bdclose(mdl); catch, end
   load_system(mdl);

@@ -58,16 +58,18 @@ Merges changes in the current on-disk model minimally back into the snapshot: **
 - **Forces a reload from disk**: internally `close_system` + `bdclose` + `load_system` (prevents reading a stale in-memory model of the same name).
 - First exports the current model to a temporary directory with `snp_export`, then performs a section-level merge with the old snapshot.
 
-### Runtime Warnings (Non-blocking; Silenced with `warning('off',…)`)
+### Runtime Guard (T70)
 
-Before the forced close-and-reload, two Simulink runtime states are checked and trigger a warning when hit:
+Before the forced close-and-reload, two Simulink runtime states are checked:
 
-| Condition | warning id | Meaning |
+| Condition | Behavior | id |
 |---|---|---|
-| `Dirty='on'` (the human has unsaved GUI changes) | `snp:dirtyUnsaved` | A forced close without saving **discards unsaved changes** — run `save_system(mdl)` first |
-| `SimulationStatus~='stopped'` | `snp:simRunning` | Structure cannot change during simulation, and a forced close interrupts it — stop the simulation first |
+| `Dirty='on'` (the human has unsaved GUI changes) | **Blocks by default** (error): run `save_system(mdl)` first, or pass `opts.Force=true` to explicitly discard | error `snp:dirtyBlocked`, preceded by warning `snp:dirtyUnsaved` |
+| `SimulationStatus~='stopped'` | Warning only (a forced close interrupts the simulation — stop it first) | warning `snp:simRunning` |
 
-The export side (`snp_export`) checks only simulation status; the propagation side (`snp_propagate`) checks both conditions for the library and every model before `bdclose('all')`.
+Why Dirty blocks while simulation only warns: a forced close-and-reload **irrecoverably discards** unsaved changes, while interrupting a simulation loses no model data — "destroys data" must be overridden by explicit intent, never by default.
+
+The export side (`snp_export`) checks only simulation status; the propagation side (`snp_propagate`) issues the same warnings for the library and every model before `bdclose('all')`, and additionally blocks on Dirty across **all loaded block diagrams**.
 
 ### opts Fields
 
@@ -75,6 +77,7 @@ The export side (`snp_export`) checks only simulation status; the propagation si
 |---|---|---|
 | `LibDir` | `''` | Library directory passed to the internal snp_export |
 | `AliasMap` | `cell(0,2)` | Alias table |
+| `Force` | `false` | `true`=proceed even if the model carries unsaved GUI changes (explicitly discarding them) |
 
 ### rep Fields
 
@@ -253,11 +256,12 @@ Two layers of official checksums with a **deliberate division of labor**:
 | Field | Description |
 |---|---|
 | `fileChecksum` | File-level MD5 (char); empty when the model is not saved to disk |
-| `funcChecksum` | Functional-level `[4x1 uint32]` |
-| `funcEqual` | Compare mode: whether the two models are functionally equivalent |
-| `fileEqual` | BaselineFile mode: whether the model is byte-identical to the baseline file |
+| `funcChecksum` | Functional-level `[4x1 uint32]`; `[]` when unavailable |
+| `funcEqual` | Compare mode, **tri-state**: `1`=equal / `0`=different / `-1`=undecidable |
+| `fileEqual` | BaselineFile mode, **tri-state**: `1`=identical / `0`=different / `-1`=undecidable |
 | `notes` | Explanations (the basis for each judgment) |
 
+- **Tri-state semantics (T71)**: an unavailable checksum (model not saved / compilation failure / read error) is **undecidable `-1`, not "equal"** — the old `isequal([],[])` reported spurious "functionally equivalent" when both sides failed. Consumers must rule out `-1` before trusting the value; **undecidable must never count as a pass**.
 - `BlockDiagram.getChecksum` **compiles the model** (official behavior), so it is slow inside `-batch`.
 - When the model is not saved, `fileChecksum` is left empty (`get_param('FileName')` is unavailable).
 
@@ -299,6 +303,10 @@ The model snapshot itself stays **byte-for-byte unchanged** (`rep.snapHashBefore
 | `LibSnap` | `WorkDir/snapshot_<lib>.m` | Library snapshot path |
 | `ModelSnaps` | `{}` (each `WorkDir/snapshot_<m>.m`) | Per-model snapshot paths |
 | `Check` | Empty struct array | Expected checks: each entry has fields `.model` / `.block` / `.param` / `.value` (string comparison) |
+| `Force` | `false` | `true`=proceed even if any loaded model carries unsaved changes (explicitly discarding them) |
+
+- **Dirty blocking across all loaded diagrams (T70)**: `bdclose('all')` force-closes **every** loaded block diagram, so the guard checks Dirty across all of them via `Simulink.allBlockDiagrams`; any unsaved model blocks by default with error `snp:dirtyBlocked` (names listed). `Force=true` overrides. If the guard's own enumeration fails it degrades to a warning (fail-open — the guard must not brick the toolchain, but it never silently proceeds either).
+- **'auto' discovery order (T72)**: `WorkDir/snapshot_*.m` is scanned for the referencing list *before* the warning/guard loop — `'auto'` arrives as a char/string scalar, and brace-indexing it first would crash immediately.
 
 The `models` argument accepts a cell (list of model names) or `'auto'`: the latter scans `WorkDir` for all `snapshot_*.m` containing `add_block('<libModel>/…', …)` to discover referencing models automatically.
 

@@ -122,7 +122,7 @@ Recommended path: [Tutorial: model → snapshot](docs/en/tutorials/model-to-snap
 "<matlab-bin>" -batch "cd('<repo>\test\scripts'); verify_rebuild_all"
 ```
 
-Main suites: `verify_rebuild_all` (rebuild fidelity 5/5), `verify_snapshots_fresh` (artifact freshness 5/5), `verify_snp_patch`, `verify_xml_structure/edit/sync` (XML tiers), `verify_behavior` (behavioral equivalence), `verify_cross_version`/`verify_multiver` (cross-version), `verify_collab` (human-agent collaboration).
+Main suites: `verify_rebuild_all` (rebuild fidelity 5/5), `verify_snapshots_fresh` (artifact freshness 5/5), `verify_snp_patch`, `verify_xml_structure/edit/sync` (XML tiers), `verify_behavior` (behavioral equivalence), `verify_cross_version`/`verify_multiver` (cross-version), `verify_collab` (human-agent collaboration), `verify_propagate` (library propagation + dirty guard).
 
 Suite logs and temporary artifacts all land in `test/scratch/` (gitignored, not committed).
 

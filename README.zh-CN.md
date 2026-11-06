@@ -122,7 +122,7 @@ config_example.m 配置示例孪生（复制为 config_local.m 填本机值）
 "<matlab-bin>" -batch "cd('<repo>\test\scripts'); verify_rebuild_all"
 ```
 
-主要套件：`verify_rebuild_all`（重建保真 5/5）、`verify_snapshots_fresh`（产物新鲜度 5/5）、`verify_snp_patch`、`verify_xml_structure/edit/sync`（XML 三阶）、`verify_behavior`（行为等价）、`verify_cross_version`/`verify_multiver`（跨版本）、`verify_collab`（人机协作）。
+主要套件：`verify_rebuild_all`（重建保真 5/5）、`verify_snapshots_fresh`（产物新鲜度 5/5）、`verify_snp_patch`、`verify_xml_structure/edit/sync`（XML 三阶）、`verify_behavior`（行为等价）、`verify_cross_version`/`verify_multiver`（跨版本）、`verify_collab`（人机协作）、`verify_propagate`（库传播 + dirty 守卫）。
 
 各套件日志与临时产物统一落在 `test/scratch/`（gitignore，不入库）。
 

@@ -16,11 +16,17 @@ function rep = snp_collab_check(model, varargin)
 %   rep = snp_collab_check('Model', 'BaselineFile', 'x.slx') % 与磁盘文件比文件级
 %
 % 输出 rep 字段：
-%   .fileChecksum    文件级 MD5（char）
-%   .funcChecksum    功能级 128 位（[4x1 uint32]）
-%   .funcEqual       （Compare 模式）两模型功能是否等价
-%   .fileEqual       （BaselineFile 模式）与基线文件是否字节一致
+%   .fileChecksum    文件级 MD5（char）；模型未存盘或路径不可得时为 ''
+%   .funcChecksum    功能级 128 位（[4x1 uint32]）；获取失败为 []
+%   .funcEqual       （Compare 模式）三态：1=相同 / 0=不同 / -1=不可判定
+%   .fileEqual       （BaselineFile 模式）三态：1=一致 / 0=不同 / -1=不可判定
 %   .notes           说明（供上层的判断依据）
+%
+% T71 三态化（外部只读审查证实的假成功）：两侧 getChecksum 都失败时
+%   isequal([],[])=true，会被误报"功能等价"。校验和不可得（模型未存盘 /
+%   编译失败 / 读取异常）是**不可判定**，不是"相同"——不可判定不得视为
+%   通过。消费者必须先排除 -1 再用真值（与 verify_collab C3 的 -1 哨兵
+%   实践一致：那里早已因假阴性弃用裸 funcEqual）。
 %
 % 边界：本函数只**度量**不改模型。BlockDiagram.getChecksum 会编译模型
 % （文档明示），故在 -batch 里调用可能较慢——这是官方行为，不是缺陷。
@@ -51,26 +57,40 @@ function rep = snp_collab_check(model, varargin)
   % --- 功能级 ---
   rep.funcChecksum = localFuncChecksum(model);
 
-  % --- Compare：两模型功能等价 ---
+  % --- Compare：两模型功能等价（T71 三态）---
   if ~isempty(o.Compare)
     if ~bdIsLoaded(o.Compare), load_system(o.Compare); end
     c2 = localFuncChecksum(o.Compare);
-    rep.funcEqual = isequal(rep.funcChecksum, c2);
-    if rep.funcEqual
+    if isempty(rep.funcChecksum) || isempty(c2)
+      rep.funcEqual = -1;
+      rep.notes = [rep.notes ' 功能等价不可判定（功能级校验和获取失败，不得视为通过）'];
+    elseif isequal(rep.funcChecksum, c2)
+      rep.funcEqual = 1;
       rep.notes = [rep.notes ' 功能等价（BlockDiagram 校验和一致）'];
     else
+      rep.funcEqual = 0;
       rep.notes = [rep.notes ' 功能不同（BlockDiagram 校验和不一致）'];
     end
   end
 
-  % --- BaselineFile：与磁盘基线比文件级 ---
+  % --- BaselineFile：与磁盘基线比文件级（T71 三态）---
   if ~isempty(o.BaselineFile) && isfile(o.BaselineFile)
-    b = Simulink.getFileChecksum(o.BaselineFile);
-    rep.fileEqual = strcmp(rep.fileChecksum, b);
-    if rep.fileEqual
-      rep.notes = [rep.notes ' 文件级与基线一致'];
+    if isempty(rep.fileChecksum)
+      rep.fileEqual = -1;
+      rep.notes = [rep.notes ' 文件级与基线不可判定（模型未存盘，无文件级校验和）'];
     else
-      rep.notes = [rep.notes ' 文件级与基线不同（人类动过或重新保存过）'];
+      b = '';
+      try, b = Simulink.getFileChecksum(o.BaselineFile); catch, end
+      if isempty(b)
+        rep.fileEqual = -1;
+        rep.notes = [rep.notes ' 文件级与基线不可判定（基线文件校验和读取失败）'];
+      elseif strcmp(rep.fileChecksum, b)
+        rep.fileEqual = 1;
+        rep.notes = [rep.notes ' 文件级与基线一致'];
+      else
+        rep.fileEqual = 0;
+        rep.notes = [rep.notes ' 文件级与基线不同（人类动过或重新保存过）'];
+      end
     end
   end
 end

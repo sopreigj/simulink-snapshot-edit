@@ -15,6 +15,7 @@
 %   o.LibSnap = '';               % 库快照路径（默认 WorkDir/snapshot_<lib>.m）
 %   o.ModelSnaps = {};            % 各模型快照路径（默认逐个 WorkDir/snapshot_<m>.m）
 %   o.Check = struct(...);        % 可选：期望校验数组（见下）
+%   o.Force = false;              % true=有模型带未保存改动时仍强关（默认阻断，T70）
 %   rep = snp_propagate('mylib', {'mA','mB'}, o)
 %   rep = snp_propagate('mylib', 'auto', o)   % models 由 WorkDir 里所有
 %                                             % ReferenceBlock 引用 mylib 的
@@ -40,6 +41,8 @@
 %   T30：库默认上锁——重建前先 close_system(lib)，库快照脚本内部 bdclose+new；
 %   T31：重建后 bdIsLoaded 恒 0，必须 open_system(产物文件) 再 get_param；
 %   T37：快照脚本 save 到**执行时 cwd**（无 SaveRel 时），必须 cd(WorkDir) 后 run。
+%   T72：models='auto' 必须先发现再走提醒/守卫循环——旧顺序对 char 输入
+%        先做 models{i} 花括号索引，'auto' 还没进发现逻辑就崩了。
 function rep = snp_propagate(libModel, models, opts)
   R = fileparts(fileparts(mfilename('fullpath')));
   while ~exist(fullfile(R, 'src', 'snp_export.m'), 'file') && ~strcmp(R, fileparts(R))
@@ -54,21 +57,14 @@ function rep = snp_propagate(libModel, models, opts)
     opts.ModelSnaps = {};
   end
   if ~isfield(opts, 'Check'), opts.Check = struct('model', {}, 'block', {}, 'param', {}, 'value', {}); end
+  if ~isfield(opts, 'Force'), opts.Force = false; end    % T70：默认护住人的未保存改动
   rep = struct('libRebuilt', false, 'libFile', '', 'nModels', 0, ...
     'nPropagated', 0, 'nFailed', 0, 'notes', '');
   rep.models = {};   % 空字段必须后加：struct() 里给 {} 会让整个结构体变空数组
-  % bdclose('all') 会无保存强关所有模型——先提醒每个相关模型的
-  % 仿真中/未保存状态（同 snp_runtime_warn）
-  snp_runtime_warn(libModel, 'reload');
-  for i = 1:numel(models)
-    if ischar(models{i}) || isstring(models{i})
-      snp_runtime_warn(char(models{i}), 'reload');
-    end
-  end
-  bdclose('all');
 
-  %% models 自动发现：WorkDir 里引用该库的 snapshot_*.m
-  if ischar(models) && strcmp(models, 'auto')
+  %% models 自动发现：WorkDir 里引用该库的 snapshot_*.m（T72：先发现，
+  %  提醒/守卫循环才能拿到真实模型名单；'auto' 是 char/string 标量）
+  if (ischar(models) || (isstring(models) && numel(models) == 1)) && strcmp(models, 'auto')
     models = {};
     snaps = dir(fullfile(opts.WorkDir, 'snapshot_*.m'));
     for i = 1:numel(snaps)
@@ -83,6 +79,37 @@ function rep = snp_propagate(libModel, models, opts)
   end
   if ~iscell(models), models = {models}; end
   rep.nModels = numel(models);
+
+  % bdclose('all') 会无保存强关所有模型——先提醒每个相关模型的
+  % 仿真中/未保存状态（同 snp_runtime_warn）
+  snp_runtime_warn(libModel, 'reload');
+  for i = 1:numel(models)
+    if ischar(models{i}) || isstring(models{i})
+      snp_runtime_warn(char(models{i}), 'reload');
+    end
+  end
+  % T70：bdclose('all') 的波及面是**全部已加载块图**，Dirty 检查也必须全量
+  %      （Simulink.allBlockDiagrams，R2023b 文档实测可用）：任一未保存
+  %      默认阻断，opts.Force=true 才放行。枚举自身失败则只警告不阻断
+  %      （fail-open：守卫不能因自身故障卡死工具链，但也不静默放行）
+  if ~opts.Force
+    try
+      bds = Simulink.allBlockDiagrams();
+      dirty = bds(strcmp(get_param(bds, 'Dirty'), 'on'));
+      if ~isempty(dirty)
+        % 单个块图时 get_param 返回 char 而非 cell（实测 R2023b），cellstr 统一
+        names = cellstr(get_param(dirty, 'Name'));
+        error('snp:dirtyBlocked', ...
+          ['bdclose(''all'') 会无保存强关以下带未保存改动的模型，改动将丢失：\n  %s\n' ...
+           '  先逐个保存：save_system(模型名)；或明确放弃：opts.Force = true'], ...
+          strjoin(names, ', '));
+      end
+    catch e
+      if strcmp(e.identifier, 'snp:dirtyBlocked'), rethrow(e); end
+      warning('snp:guardProbe', '全量 Dirty 守卫枚举失败（%s），仅警告不阻断', e.message);
+    end
+  end
+  bdclose('all');
 
   %% ---- 步骤 1：重建库 ----
   if opts.RebuildLib

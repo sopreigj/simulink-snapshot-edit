@@ -44,7 +44,7 @@ The following four points are the premises a pull relies on (MathWorks official 
 
 Sources: [Saving a Model](https://in.mathworks.com/help/simulink/ug/saving-a-model.html), [Controlling Execution of a Simulation](https://es.mathworks.com/help/simulink/ug/controlling-execution-of-a-simulation.html), [Fast Restart](https://au.mathworks.com/help/simulink/ug/fast-restart-workflow.html); for the memory/file divergence and the `bdclose` reload pattern see the earlier section "The model in memory vs the file on disk".
 
-The tools proactively warn about two of the above (without blocking execution; `warning('off','snp:dirtyUnsaved')` silences them): `snp_pull` / `snp_propagate` check `Dirty='on'` and `SimulationStatus` before force-closing an unsaved model and emit `snp:dirtyUnsaved` / `snp:simRunning` respectively when hit; `snp_export` checks only the simulation status.
+The tools proactively intervene on both conditions (as of T70, Dirty **blocks by default**; during-simulation still only warns): `snp_pull` / `snp_propagate` check `Dirty='on'` and `SimulationStatus` before force-closing an unsaved model — a hit on `Dirty='on` emits `snp:dirtyUnsaved` and then **raises `snp:dirtyBlocked`** (a forced close irrecoverably discards the changes; run `save_system` first, or pass `opts.Force=true` to discard explicitly); during a simulation they only emit `snp:simRunning` (interrupting a simulation loses no model data). `snp_export` checks only the simulation status.
 
 ## Before pulling, check "who touched the file"
 
@@ -71,7 +71,7 @@ disp(rep.funcEqual);   % expected true: the post-pull rebuilt snapshot is functi
 ## Verification scripts
 
 - `test/scripts/test_roundtrip.m` covers the basic loop end to end: A1 the snapshot rebuild equals the model with diff=0; A2 a minimal edit with comment retention; B the three human operations (move / add / delete a block) with all comments kept after pull; C the post-pull snapshot rebuild equals the edited model with diff=0.
-- `test/scripts/verify_collab.m` runs a scenario matrix (8 cases): C1-C3 consolidate the above, plus **C4 the dirty warning** (pull while the human has not saved → `snp:dirtyUnsaved`), **C5 the during-simulation warning** (SimulationStatus=running → `snp:simRunning`), and C6-C8 merge3 on orthogonal changes / same-block conflict (theirs wins) / delete-vs-edit (delete wins).
+- `test/scripts/verify_collab.m` runs a scenario matrix (8 cases): C1-C3 consolidate the above, plus **C4 dirty blocking + Force** (pull while the human has not saved → `snp:dirtyUnsaved` warning then `snp:dirtyBlocked` error, the snapshot untouched; `Force=true` proceeds; after saving, a clean merge), **C5 the during-simulation warning** (SimulationStatus=running → `snp:simRunning`), and C6-C8 merge3 on orthogonal changes / same-block conflict (theirs wins) / delete-vs-edit (delete wins).
 
 ## Common pitfalls
 

@@ -4,7 +4,7 @@
 %    C1 人改参数 + agent 注释保留        C5 仿真中 pull 提醒（snp:simRunning）
 %    C2 人加/删块 pull                   C6 merge3 正交合并（两侧改不同块）
 %    C3 pull 后重建 功能级等价           C7 merge3 同块冲突 theirs 优先（模型=唯一真相）
-%    C4 dirty 提醒（snp:dirtyUnsaved）   C8 merge3 删 vs 改 删优先并进冲突清单
+%    C4 dirty 阻断 + Force 放行（T70）   C8 merge3 删 vs 改 删优先并进冲突清单
 %
 %  输出末行：COLLAB_TOTAL ok=N/N fails=N；日志落 scratch/dbg_collab.txt。
 
@@ -26,7 +26,7 @@ function verify_collab()
   nOk = 0; nTot = 0;
   cases = {@c1, @c2, @c3, @c4, @c5, @c6, @c7, @c8};
   names = {'C1 人改参数+注释保留', 'C2 人加/删块pull', 'C3 pull后重建等价', ...
-           'C4 dirty提醒', 'C5 仿真中提醒', 'C6 merge3正交', 'C7 merge3冲突', 'C8 merge3删vs改'};
+           'C4 dirty阻断+Force', 'C5 仿真中提醒', 'C6 merge3正交', 'C7 merge3冲突', 'C8 merge3删vs改'};
   for i = 1:numel(cases)
     try
       ok = cases{i}(root, dbg);
@@ -62,12 +62,18 @@ function d = setupDir(nm)
 end
 
 function r = catchWarn(fn)
-% 取 pull/export 的 snp:* warning id（T59 后运行时提醒）
+% 取 pull/export 的 snp:* warning id（T59 后运行时提醒）；T70 起同取 error id
   lastwarn('');
   rep = [];
-  try, rep = fn(); catch err, rep = struct('error', err.message); end
+  errId = '';
+  try
+    rep = fn();
+  catch err
+    rep = struct('error', err.message);
+    errId = err.identifier;
+  end
   [~, mid] = lastwarn();
-  r = struct('id', mid, 'rep', rep);
+  r = struct('id', mid, 'errId', errId, 'rep', rep);
 end
 
 function snap = buildSnap(d, nm, gain, hasSub)
@@ -231,7 +237,7 @@ function ok = c3(root, dbg)
   try, close_system(nm, 0); catch, end
 end
 
-%% ---------- C4 dirty 提醒（人改完不存盘）----------
+%% ---------- C4 dirty 阻断 + Force 放行（T70）----------
 function ok = c4(root, dbg)
   here = fileparts(mfilename('fullpath'));
   nm = 'cbC4'; d = setupDir(nm);
@@ -243,8 +249,17 @@ function ok = c4(root, dbg)
   set_param([nm '/G1'], 'Gain', '9');
   o = struct(); o.OutDir = d;
   w = catchWarn(@() snp_pull(nm, snap, o));
-  say(dbg, '  dirty拉 pull warnId=[%s] dirty=%s', w.id, get_param(nm, 'Dirty'));
-  warnHit = strcmp(w.id, 'snp:dirtyUnsaved');
+  % 默认阻断：dirty 提醒 + snp:dirtyBlocked 错误，且 pull 未动快照
+  say(dbg, '  dirty拉 pull warnId=[%s] errId=[%s] 快照未动=%d', w.id, w.errId, ...
+      0 + ~isfield(w.rep, 'nChg'));
+  blocked = strcmp(w.id, 'snp:dirtyUnsaved') && ...
+            strcmp(w.errId, 'snp:dirtyBlocked') && ~isfield(w.rep, 'nChg');
+
+  % Force=true=明确放弃未保存改动 → 放行（合并磁盘内容，nChg=0 属正常）
+  oF = o; oF.Force = true;
+  wF = catchWarn(@() snp_pull(nm, snap, oF));
+  say(dbg, '  Force放行 errId=[%s] 有合并结果=%d', wF.errId, 0 + isfield(wF.rep, 'nChg'));
+  forcedOk = isempty(wF.errId) && isfield(wF.rep, 'nChg');
 
   % 收尾：重做改动并存盘 → 再 pull 应无 dirty 提醒且正常合并
   load_system(nm);
@@ -255,7 +270,7 @@ function ok = c4(root, dbg)
   cleanPull = ~strcmp(w2.id, 'snp:dirtyUnsaved') && isfield(rep, 'nChg') && rep.nChg >= 1;
   say(dbg, '  存盘后pull warnId=[%s] nChg=%d', w2.id, ...
     0 + isfield(rep, 'nChg') * rep.nChg);
-  ok = warnHit && cleanPull;
+  ok = blocked && forcedOk && cleanPull;
   try, close_system(nm, 0); catch, end
 end
 
